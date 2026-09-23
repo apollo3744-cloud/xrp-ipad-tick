@@ -1,9 +1,8 @@
 (()=>{
 'use strict';
-const URL='wss://api.upbit.com/websocket/v1',MARKET='KRW-XRP',LB=3,FLAT=.02,CONV=.25,MAX=180;
-const $=x=>document.getElementById(x),E={conn:$('conn'),price:$('price'),count:$('count'),v:$('vwapState'),sig:$('signal'),p240:$('p240'),p960:$('p960'),c240:$('c240'),c960:$('c960'),re:$('reconnect'),store:$('store')};
-let ws=null,n=0,db=null,lastSave=0,restored=false;
-const DBN='xrp_tick_pwa_v2',DBV=1,ST='state';
+const URL='wss://api.upbit.com/websocket/v1',MARKET='KRW-XRP',LB=3,FLAT=.02,CONV=.25,MAX=320,STORE='xrp_tick_v3_state';
+const $=x=>document.getElementById(x),E={conn:$('conn'),price:$('price'),count:$('count'),v:$('vwapState'),sig:$('signal'),p240:$('p240'),p960:$('p960'),c240:$('c240'),c960:$('c960'),re:$('reconnect')};
+let ws=null,n=0;
 function Builder(size){this.size=size;this.done=[];this.cur=null}
 function newBar(t){return{open:t.p,high:t.p,low:t.p,close:t.p,volume:t.q,pv:t.p*t.q,buy:t.s==='BID'?t.q:0,sell:t.s==='ASK'?t.q:0,start:t.ts,end:t.ts,count:1,vwap:t.p}}
 function fin(b){b.vwap=b.volume?b.pv/b.volume:b.close}
@@ -11,22 +10,72 @@ Builder.prototype.add=function(t){if(!this.cur)this.cur=newBar(t);else{let b=thi
 const B={240:new Builder(240),960:new Builder(960)};
 function bars(b){let a=b.done.slice();if(b.cur){let c={...b.cur};fin(c);a.push(c)}return a}
 function ema(v,s){if(!v.length)return[];let k=2/(s+1),e=v[0],o=[e];for(let i=1;i<v.length;i++){e=v[i]*k+e*(1-k);o.push(e)}return o}
-function ind(a){let c=a.map(x=>x.close);return{e5:ema(c,5),e10:ema(c,10),e20:ema(c,20),e60:ema(c,60),e120:ema(c,120),vwap:a.map(x=>x.vwap)}}
+function rollingVwap20(a){let out=[],q=[],pvSum=0,volSum=0;for(let i=0;i<a.length;i++){let b=a[i],typ=(b.high+b.low+b.close)/3,vol=Math.max(0,Number(b.volume)||0),pv=typ*vol;q.push({pv,vol});pvSum+=pv;volSum+=vol;if(q.length>20){let o=q.shift();pvSum-=o.pv;volSum-=o.vol}out.push(volSum>0?pvSum/volSum:b.close)}return out}
+function ind(a){let c=a.map(x=>x.close);return{e5:ema(c,5),e10:ema(c,10),e20:ema(c,20),e60:ema(c,60),e120:ema(c,120),vwap:rollingVwap20(a)}}
 function slope(v){if(v.length<LB+1)return{state:'FLAT',pct:0};let a=v.at(-1),b=v[v.length-1-LB],p=b?(a/b-1)*100:0;return{state:p>FLAT?'UP':p<-FLAT?'DOWN':'FLAT',pct:p}}
+
+function arrowSignals(a,I){
+  const out=[];
+  if(a.length<3)return out;
+  for(let i=1;i<a.length;i++){
+    const px=a[i].close||1;
+    const span=(Math.max(I.e5[i],I.e10[i],I.e20[i])-Math.min(I.e5[i],I.e10[i],I.e20[i]))/px*100;
+    const converged=span<=CONV;
+    if(!converged)continue;
+
+    const up=I.e5[i-1]<=I.vwap[i-1] && I.e5[i]>I.vwap[i];
+    const down=I.e5[i-1]>=I.vwap[i-1] && I.e5[i]<I.vwap[i];
+
+    if(up) out.push({i,dir:'UP',price:a[i].low});
+    if(down) out.push({i,dir:'DOWN',price:a[i].high});
+  }
+  return out;
+}
+
 function signal(){let a=bars(B[240]);if(a.length<22)return{state:'FLAT',pct:0,label:'WAIT',cls:'wait'};let I=ind(a),i=a.length-1,p=i-1,S=slope(I.vwap),px=a[i].close,span=(Math.max(I.e5[i],I.e10[i],I.e20[i])-Math.min(I.e5[i],I.e10[i],I.e20[i]))/px*100,conv=span<=CONV,up=I.e5[p]<=I.vwap[p]&&I.e5[i]>I.vwap[i],dn=I.e5[p]>=I.vwap[p]&&I.e5[i]<I.vwap[i];if(S.state==='UP'&&conv&&up)return{...S,label:'BUY 후보',cls:'buy'};if(S.state==='DOWN'&&conv&&dn)return{...S,label:'SELL 후보',cls:'sell'};if(S.state==='UP')return{...S,label:'HOLD / BUY 허가',cls:'buy'};if(S.state==='DOWN')return{...S,label:'BUY 차단 / SELL 관찰',cls:'sell'};return{...S,label:'WAIT',cls:'wait'}}
-function draw(cv,a){let d=Math.max(1,devicePixelRatio||1),r=cv.getBoundingClientRect();cv.width=Math.floor(r.width*d);cv.height=Math.floor(r.height*d);let x=cv.getContext('2d');x.setTransform(d,0,0,d,0,0);let W=r.width,H=r.height;x.clearRect(0,0,W,H);let pad={l:46,r:12,t:12,b:22},pw=W-pad.l-pad.r,ph=H-pad.t-pad.b;if(a.length<2){x.fillStyle='#777';x.font='14px sans-serif';x.fillText('실시간 체결 수집 중...',18,32);return}a=a.slice(-110);let I=ind(a),all=[];a.forEach(b=>all.push(b.high,b.low));Object.values(I).forEach(s=>s.forEach(v=>Number.isFinite(v)&&all.push(v)));let mn=Math.min(...all),mx=Math.max(...all),ex=(mx-mn)*.08||1;mn-=ex;mx+=ex;let X=i=>pad.l+(i+.5)*(pw/a.length),Y=v=>pad.t+(mx-v)/(mx-mn)*ph;x.strokeStyle='#ececec';x.lineWidth=1;for(let g=0;g<=5;g++){let yy=pad.t+ph*g/5;x.beginPath();x.moveTo(pad.l,yy);x.lineTo(W-pad.r,yy);x.stroke()}let cw=Math.max(2,Math.min(7,pw/a.length*.68));a.forEach((b,i)=>{let up=b.close>=b.open,c=up?'#e65d5d':'#4b82e8';x.strokeStyle=c;x.fillStyle=c;x.beginPath();x.moveTo(X(i),Y(b.high));x.lineTo(X(i),Y(b.low));x.stroke();let yo=Y(b.open),yc=Y(b.close);x.fillRect(X(i)-cw/2,Math.min(yo,yc),cw,Math.max(1,Math.abs(yc-yo)))});[['e5','#2f80ed',1.2],['e10','#f2994a',1.2],['e20','#27ae60',1.4],['e60','#eb5757',1.3],['e120','#9b51e0',1.3],['vwap','#8d5a44',2.8]].forEach(([k,c,l])=>{x.strokeStyle=c;x.lineWidth=l;x.setLineDash(k==='vwap'?[7,5]:[]);x.beginPath();I[k].forEach((v,i)=>i?x.lineTo(X(i),Y(v)):x.moveTo(X(i),Y(v)));x.stroke();x.setLineDash([])});x.fillStyle='#555';x.font='11px sans-serif';x.fillText(mx.toFixed(1),3,pad.t+4);x.fillText(mn.toFixed(1),3,pad.t+ph);let tm=new Date(a.at(-1).end).toLocaleTimeString('ko-KR',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});x.fillText(tm,W-68,H-5)}
+function draw(cv,a){let d=Math.max(1,devicePixelRatio||1),r=cv.getBoundingClientRect();cv.width=Math.floor(r.width*d);cv.height=Math.floor(r.height*d);let x=cv.getContext('2d');x.setTransform(d,0,0,d,0,0);let W=r.width,H=r.height;x.clearRect(0,0,W,H);let pad={l:46,r:12,t:12,b:22},pw=W-pad.l-pad.r,ph=H-pad.t-pad.b;if(a.length<2){x.fillStyle='#777';x.font='14px sans-serif';x.fillText('실시간 체결 수집 중...',18,32);return}a=a.slice(-110);let I=ind(a),all=[];a.forEach(b=>all.push(b.high,b.low));Object.values(I).forEach(s=>s.forEach(v=>Number.isFinite(v)&&all.push(v)));let mn=Math.min(...all),mx=Math.max(...all),ex=(mx-mn)*.08||1;mn-=ex;mx+=ex;let X=i=>pad.l+(i+.5)*(pw/a.length),Y=v=>pad.t+(mx-v)/(mx-mn)*ph;x.strokeStyle='#ececec';x.lineWidth=1;for(let g=0;g<=5;g++){let yy=pad.t+ph*g/5;x.beginPath();x.moveTo(pad.l,yy);x.lineTo(W-pad.r,yy);x.stroke()}let cw=Math.max(2,Math.min(7,pw/a.length*.68));a.forEach((b,i)=>{let up=b.close>=b.open,c=up?'#e65d5d':'#4b82e8';x.strokeStyle=c;x.fillStyle=c;x.beginPath();x.moveTo(X(i),Y(b.high));x.lineTo(X(i),Y(b.low));x.stroke();let yo=Y(b.open),yc=Y(b.close);x.fillRect(X(i)-cw/2,Math.min(yo,yc),cw,Math.max(1,Math.abs(yc-yo)))});[['e5','#2f80ed',1.2],['e10','#f2994a',1.2],['e20','#27ae60',1.4],['e60','#eb5757',1.3],['e120','#9b51e0',1.3],['vwap','#8d5a44',2.8]].forEach(([k,c,l])=>{x.strokeStyle=c;x.lineWidth=l;x.setLineDash(k==='vwap'?[7,5]:[]);x.beginPath();I[k].forEach((v,i)=>i?x.lineTo(X(i),Y(v)):x.moveTo(X(i),Y(v)));x.stroke();x.setLineDash([])});
+// EMA5/10/20 수렴 상태에서 EMA5가 VWAP을 상향/하향 돌파한 지점에 화살표 표시
+const arrows=arrowSignals(a,I);
+arrows.forEach(s=>{
+  const xx=X(s.i);
+
+  if(s.dir==='UP'){
+    const yy=Y(s.price)+15;
+    x.fillStyle='#0a8f3c';
+    x.beginPath();
+    x.moveTo(xx,yy-11);
+    x.lineTo(xx-7,yy-1);
+    x.lineTo(xx-2.5,yy-1);
+    x.lineTo(xx-2.5,yy+8);
+    x.lineTo(xx+2.5,yy+8);
+    x.lineTo(xx+2.5,yy-1);
+    x.lineTo(xx+7,yy-1);
+    x.closePath();
+    x.fill();
+  } else {
+    const yy=Y(s.price)-15;
+    x.fillStyle='#c62828';
+    x.beginPath();
+    x.moveTo(xx,yy+11);
+    x.lineTo(xx-7,yy+1);
+    x.lineTo(xx-2.5,yy+1);
+    x.lineTo(xx-2.5,yy-8);
+    x.lineTo(xx+2.5,yy-8);
+    x.lineTo(xx+2.5,yy+1);
+    x.lineTo(xx+7,yy+1);
+    x.closePath();
+    x.fill();
+  }
+});
+x.fillStyle='#555';x.font='11px sans-serif';x.fillText(mx.toFixed(1),3,pad.t+4);x.fillText(mn.toFixed(1),3,pad.t+ph);let tm=new Date(a.at(-1).end).toLocaleTimeString('ko-KR',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});x.fillText(tm,W-68,H-5)}
 function render(){draw(E.c240,bars(B[240]));draw(E.c960,bars(B[960]));E.p240.textContent=`${B[240].cur?.count||0}/240`;E.p960.textContent=`${B[960].cur?.count||0}/960`;let s=signal();E.v.textContent=`VWAP ${s.state} ${s.pct>=0?'+':''}${s.pct.toFixed(3)}%`;E.v.className='badge '+(s.state==='UP'?'up':s.state==='DOWN'?'down':'flat');E.sig.textContent=s.label;E.sig.className='signal '+s.cls}
+
+function saveState(){try{localStorage.setItem(STORE,JSON.stringify({v:3,n,B240:{done:B[240].done,cur:B[240].cur},B960:{done:B[960].done,cur:B[960].cur},saved:Date.now()}));E.count.textContent=`체결 ${n.toLocaleString()} · 자동저장`}catch(e){}}
+function loadState(){try{let s=JSON.parse(localStorage.getItem(STORE)||'null');if(!s||s.v!==3)return false;n=Number(s.n)||0;if(s.B240){B[240].done=Array.isArray(s.B240.done)?s.B240.done.slice(-MAX):[];B[240].cur=s.B240.cur||null}if(s.B960){B[960].done=Array.isArray(s.B960.done)?s.B960.done.slice(-MAX):[];B[960].cur=s.B960.cur||null}return B[240].done.length>0||B[960].done.length>0}catch(e){return false}}
+let saveTimer=null;function queueSave(){clearTimeout(saveTimer);saveTimer=setTimeout(saveState,1200)}
+
 async function parse(d){try{if(d instanceof Blob)return JSON.parse(await d.text());if(d instanceof ArrayBuffer)return JSON.parse(new TextDecoder().decode(d));if(typeof d==='string')return JSON.parse(d)}catch(e){}return null}
 function status(t,c='flat'){E.conn.textContent=t;E.conn.className='badge '+c}
-
-function openDB(){return new Promise((res,rej)=>{let r=indexedDB.open(DBN,DBV);r.onupgradeneeded=()=>r.result.createObjectStore(ST);r.onsuccess=()=>{db=r.result;res(db)};r.onerror=()=>rej(r.error)})}
-function getDB(k){return new Promise((res,rej)=>{let r=db.transaction(ST,'readonly').objectStore(ST).get(k);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
-function setDB(k,v){return new Promise((res,rej)=>{let t=db.transaction(ST,'readwrite');t.objectStore(ST).put(v,k);t.oncomplete=()=>res();t.onerror=()=>rej(t.error)})}
-function storeStatus(t,c='flat'){if(E.store){E.store.textContent=t;E.store.className='badge '+c}}
-async function restoreState(){try{await openDB();let s=await getDB('runtime');if(s){B[240].done=s.b240?.done||[];B[240].cur=s.b240?.cur||null;B[960].done=s.b960?.done||[];B[960].cur=s.b960?.cur||null;n=Number(s.trades||0);E.count.textContent=`체결 ${n.toLocaleString()}`;if(s.lastPrice)E.price.textContent=`${Number(s.lastPrice).toLocaleString()} KRW`;storeStatus('이전 데이터 복원','up')}else storeStatus('새 저장 시작');restored=true;render()}catch(e){console.warn(e);restored=true;storeStatus('저장소 오류','down')}}
-let saving=false;
-async function saveState(){if(!db||!restored||saving)return;saving=true;try{let lp=bars(B[240]).at(-1)?.close||null;await setDB('runtime',{savedAt:Date.now(),trades:n,lastPrice:lp,b240:{done:B[240].done,cur:B[240].cur},b960:{done:B[960].done,cur:B[960].cur}});lastSave=Date.now();storeStatus('자동 저장됨','up')}catch(e){console.warn(e);storeStatus('저장 실패','down')}finally{saving=false}}
-function maybeSave(){if(n%50===0||Date.now()-lastSave>15000)saveState()}
-function connect(){if(ws)try{ws.close()}catch(e){}status('연결 중');ws=new WebSocket(URL);ws.binaryType='arraybuffer';ws.onopen=()=>{ws.send(JSON.stringify([{ticket:'ipad-xrp-'+Date.now()},{type:'trade',codes:[MARKET],is_only_realtime:true},{format:'DEFAULT'}]));status('실시간 연결','up')};ws.onmessage=async e=>{let m=await parse(e.data);if(!m||m.type!=='trade'||m.code!==MARKET)return;let t={p:Number(m.trade_price),q:Number(m.trade_volume||0),s:m.ask_bid,ts:Number(m.trade_timestamp||m.timestamp||Date.now())};if(!Number.isFinite(t.p))return;n++;B[240].add(t);B[960].add(t);E.price.textContent=`${t.p.toLocaleString()} KRW`;E.count.textContent=`체결 ${n.toLocaleString()}`;render();maybeSave()};ws.onerror=()=>status('연결 오류','down');ws.onclose=()=>{status('재연결 대기','down');setTimeout(()=>connect(),3000)}}
-E.re.onclick=connect;addEventListener('resize',render);document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')saveState();if(document.visibilityState==='visible'&&(!ws||ws.readyState>1))connect()});addEventListener('pagehide',()=>saveState());if('serviceWorker'in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});(async()=>{await restoreState();connect()})();setInterval(()=>{render();maybeSave()},1000);
+function connect(){if(ws)try{ws.close()}catch(e){}status('연결 중');ws=new WebSocket(URL);ws.binaryType='arraybuffer';ws.onopen=()=>{ws.send(JSON.stringify([{ticket:'ipad-xrp-'+Date.now()},{type:'trade',codes:[MARKET],is_only_realtime:true},{format:'DEFAULT'}]));status('실시간 연결','up')};ws.onmessage=async e=>{let m=await parse(e.data);if(!m||m.type!=='trade'||m.code!==MARKET)return;let t={p:Number(m.trade_price),q:Number(m.trade_volume||0),s:m.ask_bid,ts:Number(m.trade_timestamp||m.timestamp||Date.now())};if(!Number.isFinite(t.p))return;n++;B[240].add(t);B[960].add(t);E.price.textContent=`${t.p.toLocaleString()} KRW`;E.count.textContent=`체결 ${n.toLocaleString()}`;render();queueSave()};ws.onerror=()=>status('연결 오류','down');ws.onclose=()=>{status('재연결 대기','down');setTimeout(()=>connect(),3000)}}
+E.re.onclick=connect;addEventListener('resize',render);document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&(!ws||ws.readyState>1))connect()});if('serviceWorker'in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});if(loadState()){render();E.count.textContent=`체결 ${n.toLocaleString()} · 복원됨`}connect();setInterval(render,1000);addEventListener('beforeunload',saveState);document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')saveState()});
 })();

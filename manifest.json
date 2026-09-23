@@ -1,5 +1,5 @@
 {
-  "name": "XRP 실시간 틱차트 v2",
+  "name": "XRP 실시간 틱차트",
   "short_name": "XRP Tick",
   "start_url": "./index.html",
   "display": "standalone",
