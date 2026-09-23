@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#ffffff">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon.svg">
+<title>XRP 실시간 틱차트</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;background:#fff;color:#111;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+header{position:sticky;top:0;z-index:5;background:#fff;border-bottom:1px solid #ddd;padding:8px 10px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}h1{font-size:20px;margin:0 8px 0 0}
+.badge{padding:4px 8px;border-radius:999px;background:#f1f1f1;font-size:12px}.up{background:#e8f7ee}.down{background:#fdeaea}.flat{background:#f1f1f1}
+button{border:1px solid #bbb;background:#fff;border-radius:8px;padding:7px 10px}
+main{padding:6px}.wrap{border-bottom:1px solid #ddd;margin-bottom:6px}.head{display:flex;justify-content:space-between;padding:4px;font-size:13px}
+canvas{display:block;width:100%;height:42vh;min-height:300px}.legend{padding:2px 4px 7px;font-size:11px;color:#555}
+.signal{font-weight:700}.buy{color:#0a8f3c}.sell{color:#c62828}.wait{color:#555}
+@media(orientation:portrait){canvas{height:38vh;min-height:250px}}
+</style>
+</head>
+<body>
+<header>
+<div class="row">
+<h1>XRP 실시간 틱차트</h1>
+<span id="conn" class="badge flat">연결 대기</span>
+<span id="price" class="badge">가격 -</span>
+<span id="count" class="badge">체결 0</span>
+<button id="reconnect">재연결</button>
+</div>
+<div class="row" style="margin-top:6px">
+<span id="vwapState" class="badge flat">VWAP -</span>
+<span id="signal" class="signal wait">WAIT</span>
+<span class="badge">READ ONLY · NO ORDER</span>
+</div>
+</header>
+<main>
+<section class="wrap"><div class="head"><b>XRP 960T</b><span id="p960">0/960</span></div><canvas id="c960"></canvas><div class="legend">EMA5 · EMA10 · EMA20 · EMA60 · EMA120 · VWAP</div></section>
+<section class="wrap"><div class="head"><b>XRP 240T</b><span id="p240">0/240</span></div><canvas id="c240"></canvas><div class="legend">EMA5 · EMA10 · EMA20 · EMA60 · EMA120 · VWAP</div></section>
+</main>
+<script src="app.js"></script>
+</body></html>
