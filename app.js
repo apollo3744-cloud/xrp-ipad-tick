@@ -1,81 +1,31 @@
 (()=>{
 'use strict';
-const URL='wss://api.upbit.com/websocket/v1',MARKET='KRW-XRP',LB=3,FLAT=.02,CONV=.25,MAX=320,STORE='xrp_tick_v3_state';
-const $=x=>document.getElementById(x),E={conn:$('conn'),price:$('price'),count:$('count'),v:$('vwapState'),sig:$('signal'),p240:$('p240'),p960:$('p960'),c240:$('c240'),c960:$('c960'),re:$('reconnect')};
-let ws=null,n=0;
-function Builder(size){this.size=size;this.done=[];this.cur=null}
-function newBar(t){return{open:t.p,high:t.p,low:t.p,close:t.p,volume:t.q,pv:t.p*t.q,buy:t.s==='BID'?t.q:0,sell:t.s==='ASK'?t.q:0,start:t.ts,end:t.ts,count:1,vwap:t.p}}
-function fin(b){b.vwap=b.volume?b.pv/b.volume:b.close}
-Builder.prototype.add=function(t){if(!this.cur)this.cur=newBar(t);else{let b=this.cur;b.high=Math.max(b.high,t.p);b.low=Math.min(b.low,t.p);b.close=t.p;b.volume+=t.q;b.pv+=t.p*t.q;b.end=t.ts;b.count++}if(this.cur.count>=this.size){fin(this.cur);this.done.push(this.cur);if(this.done.length>MAX)this.done.shift();this.cur=null}}
-const B={240:new Builder(240),960:new Builder(960)};
-function bars(b){let a=b.done.slice();if(b.cur){let c={...b.cur};fin(c);a.push(c)}return a}
+const WS='wss://api.upbit.com/websocket/v1', REST='https://api.upbit.com/v1/trades/ticks', M='KRW-XRP';
+const TARGET=120000,BATCH=500,DELAY=280,MAX=620,VW=20,LB=3,FLAT=.02,CONV=.25,KEY='xrp_v4';
+const $=id=>document.getElementById(id),E={conn:$('conn'),price:$('price'),count:$('count'),save:$('save'),v:$('vwapState'),sig:$('signal'),hist:$('history'),hb:$('histbar'),p240:$('p240'),p960:$('p960'),c240:$('c240'),c960:$('c960'),re:$('reconnect')};
+let ws=null,seq=0,lastSid=null,live=0,timer=null;
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+function B(size){this.size=size;this.done=[];this.cur=null}
+B.prototype.add=function(t){let gid=Math.floor(t.seq/this.size);if(!this.cur||this.cur.gid!==gid){if(this.cur){this.cur.complete=this.cur.count>=this.size;this.done.push(this.cur);if(this.done.length>MAX)this.done.shift()}this.cur={gid,open:t.p,high:t.p,low:t.p,close:t.p,volume:t.q,start:t.ts,end:t.ts,count:1,complete:false}}else{let b=this.cur;b.high=Math.max(b.high,t.p);b.low=Math.min(b.low,t.p);b.close=t.p;b.volume+=t.q;b.end=t.ts;b.count++}if(this.cur&&this.cur.count>=this.size){this.cur.complete=true;this.done.push(this.cur);if(this.done.length>MAX)this.done.shift();this.cur=null}};
+const C={240:new B(240),960:new B(960)};
+const bars=b=>{let a=b.done.slice();if(b.cur)a.push({...b.cur});return a};
 function ema(v,s){if(!v.length)return[];let k=2/(s+1),e=v[0],o=[e];for(let i=1;i<v.length;i++){e=v[i]*k+e*(1-k);o.push(e)}return o}
-function rollingVwap20(a){let out=[],q=[],pvSum=0,volSum=0;for(let i=0;i<a.length;i++){let b=a[i],typ=(b.high+b.low+b.close)/3,vol=Math.max(0,Number(b.volume)||0),pv=typ*vol;q.push({pv,vol});pvSum+=pv;volSum+=vol;if(q.length>20){let o=q.shift();pvSum-=o.pv;volSum-=o.vol}out.push(volSum>0?pvSum/volSum:b.close)}return out}
-function ind(a){let c=a.map(x=>x.close);return{e5:ema(c,5),e10:ema(c,10),e20:ema(c,20),e60:ema(c,60),e120:ema(c,120),vwap:rollingVwap20(a)}}
-function slope(v){if(v.length<LB+1)return{state:'FLAT',pct:0};let a=v.at(-1),b=v[v.length-1-LB],p=b?(a/b-1)*100:0;return{state:p>FLAT?'UP':p<-FLAT?'DOWN':'FLAT',pct:p}}
-
-function arrowSignals(a,I){
-  const out=[];
-  if(a.length<3)return out;
-  for(let i=1;i<a.length;i++){
-    const px=a[i].close||1;
-    const span=(Math.max(I.e5[i],I.e10[i],I.e20[i])-Math.min(I.e5[i],I.e10[i],I.e20[i]))/px*100;
-    const converged=span<=CONV;
-    if(!converged)continue;
-
-    const up=I.e5[i-1]<=I.vwap[i-1] && I.e5[i]>I.vwap[i];
-    const down=I.e5[i-1]>=I.vwap[i-1] && I.e5[i]<I.vwap[i];
-
-    if(up) out.push({i,dir:'UP',price:a[i].low});
-    if(down) out.push({i,dir:'DOWN',price:a[i].high});
-  }
-  return out;
-}
-
-function signal(){let a=bars(B[240]);if(a.length<22)return{state:'FLAT',pct:0,label:'WAIT',cls:'wait'};let I=ind(a),i=a.length-1,p=i-1,S=slope(I.vwap),px=a[i].close,span=(Math.max(I.e5[i],I.e10[i],I.e20[i])-Math.min(I.e5[i],I.e10[i],I.e20[i]))/px*100,conv=span<=CONV,up=I.e5[p]<=I.vwap[p]&&I.e5[i]>I.vwap[i],dn=I.e5[p]>=I.vwap[p]&&I.e5[i]<I.vwap[i];if(S.state==='UP'&&conv&&up)return{...S,label:'BUY 후보',cls:'buy'};if(S.state==='DOWN'&&conv&&dn)return{...S,label:'SELL 후보',cls:'sell'};if(S.state==='UP')return{...S,label:'HOLD / BUY 허가',cls:'buy'};if(S.state==='DOWN')return{...S,label:'BUY 차단 / SELL 관찰',cls:'sell'};return{...S,label:'WAIT',cls:'wait'}}
-function draw(cv,a){let d=Math.max(1,devicePixelRatio||1),r=cv.getBoundingClientRect();cv.width=Math.floor(r.width*d);cv.height=Math.floor(r.height*d);let x=cv.getContext('2d');x.setTransform(d,0,0,d,0,0);let W=r.width,H=r.height;x.clearRect(0,0,W,H);let pad={l:46,r:12,t:12,b:22},pw=W-pad.l-pad.r,ph=H-pad.t-pad.b;if(a.length<2){x.fillStyle='#777';x.font='14px sans-serif';x.fillText('실시간 체결 수집 중...',18,32);return}a=a.slice(-110);let I=ind(a),all=[];a.forEach(b=>all.push(b.high,b.low));Object.values(I).forEach(s=>s.forEach(v=>Number.isFinite(v)&&all.push(v)));let mn=Math.min(...all),mx=Math.max(...all),ex=(mx-mn)*.08||1;mn-=ex;mx+=ex;let X=i=>pad.l+(i+.5)*(pw/a.length),Y=v=>pad.t+(mx-v)/(mx-mn)*ph;x.strokeStyle='#ececec';x.lineWidth=1;for(let g=0;g<=5;g++){let yy=pad.t+ph*g/5;x.beginPath();x.moveTo(pad.l,yy);x.lineTo(W-pad.r,yy);x.stroke()}let cw=Math.max(2,Math.min(7,pw/a.length*.68));a.forEach((b,i)=>{let up=b.close>=b.open,c=up?'#e65d5d':'#4b82e8';x.strokeStyle=c;x.fillStyle=c;x.beginPath();x.moveTo(X(i),Y(b.high));x.lineTo(X(i),Y(b.low));x.stroke();let yo=Y(b.open),yc=Y(b.close);x.fillRect(X(i)-cw/2,Math.min(yo,yc),cw,Math.max(1,Math.abs(yc-yo)))});[['e5','#2f80ed',1.2],['e10','#f2994a',1.2],['e20','#27ae60',1.4],['e60','#eb5757',1.3],['e120','#9b51e0',1.3],['vwap','#8d5a44',2.8]].forEach(([k,c,l])=>{x.strokeStyle=c;x.lineWidth=l;x.setLineDash(k==='vwap'?[7,5]:[]);x.beginPath();I[k].forEach((v,i)=>i?x.lineTo(X(i),Y(v)):x.moveTo(X(i),Y(v)));x.stroke();x.setLineDash([])});
-// EMA5/10/20 수렴 상태에서 EMA5가 VWAP을 상향/하향 돌파한 지점에 화살표 표시
-const arrows=arrowSignals(a,I);
-arrows.forEach(s=>{
-  const xx=X(s.i);
-
-  if(s.dir==='UP'){
-    const yy=Y(s.price)+15;
-    x.fillStyle='#0a8f3c';
-    x.beginPath();
-    x.moveTo(xx,yy-11);
-    x.lineTo(xx-7,yy-1);
-    x.lineTo(xx-2.5,yy-1);
-    x.lineTo(xx-2.5,yy+8);
-    x.lineTo(xx+2.5,yy+8);
-    x.lineTo(xx+2.5,yy-1);
-    x.lineTo(xx+7,yy-1);
-    x.closePath();
-    x.fill();
-  } else {
-    const yy=Y(s.price)-15;
-    x.fillStyle='#c62828';
-    x.beginPath();
-    x.moveTo(xx,yy+11);
-    x.lineTo(xx-7,yy+1);
-    x.lineTo(xx-2.5,yy+1);
-    x.lineTo(xx-2.5,yy-8);
-    x.lineTo(xx+2.5,yy-8);
-    x.lineTo(xx+2.5,yy+1);
-    x.lineTo(xx+7,yy+1);
-    x.closePath();
-    x.fill();
-  }
-});
-x.fillStyle='#555';x.font='11px sans-serif';x.fillText(mx.toFixed(1),3,pad.t+4);x.fillText(mn.toFixed(1),3,pad.t+ph);let tm=new Date(a.at(-1).end).toLocaleTimeString('ko-KR',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});x.fillText(tm,W-68,H-5)}
-function render(){draw(E.c240,bars(B[240]));draw(E.c960,bars(B[960]));E.p240.textContent=`${B[240].cur?.count||0}/240`;E.p960.textContent=`${B[960].cur?.count||0}/960`;let s=signal();E.v.textContent=`VWAP ${s.state} ${s.pct>=0?'+':''}${s.pct.toFixed(3)}%`;E.v.className='badge '+(s.state==='UP'?'up':s.state==='DOWN'?'down':'flat');E.sig.textContent=s.label;E.sig.className='signal '+s.cls}
-
-function saveState(){try{localStorage.setItem(STORE,JSON.stringify({v:3,n,B240:{done:B[240].done,cur:B[240].cur},B960:{done:B[960].done,cur:B[960].cur},saved:Date.now()}));E.count.textContent=`체결 ${n.toLocaleString()} · 자동저장`}catch(e){}}
-function loadState(){try{let s=JSON.parse(localStorage.getItem(STORE)||'null');if(!s||s.v!==3)return false;n=Number(s.n)||0;if(s.B240){B[240].done=Array.isArray(s.B240.done)?s.B240.done.slice(-MAX):[];B[240].cur=s.B240.cur||null}if(s.B960){B[960].done=Array.isArray(s.B960.done)?s.B960.done.slice(-MAX):[];B[960].cur=s.B960.cur||null}return B[240].done.length>0||B[960].done.length>0}catch(e){return false}}
-let saveTimer=null;function queueSave(){clearTimeout(saveTimer);saveTimer=setTimeout(saveState,1200)}
-
-async function parse(d){try{if(d instanceof Blob)return JSON.parse(await d.text());if(d instanceof ArrayBuffer)return JSON.parse(new TextDecoder().decode(d));if(typeof d==='string')return JSON.parse(d)}catch(e){}return null}
-function status(t,c='flat'){E.conn.textContent=t;E.conn.className='badge '+c}
-function connect(){if(ws)try{ws.close()}catch(e){}status('연결 중');ws=new WebSocket(URL);ws.binaryType='arraybuffer';ws.onopen=()=>{ws.send(JSON.stringify([{ticket:'ipad-xrp-'+Date.now()},{type:'trade',codes:[MARKET],is_only_realtime:true},{format:'DEFAULT'}]));status('실시간 연결','up')};ws.onmessage=async e=>{let m=await parse(e.data);if(!m||m.type!=='trade'||m.code!==MARKET)return;let t={p:Number(m.trade_price),q:Number(m.trade_volume||0),s:m.ask_bid,ts:Number(m.trade_timestamp||m.timestamp||Date.now())};if(!Number.isFinite(t.p))return;n++;B[240].add(t);B[960].add(t);E.price.textContent=`${t.p.toLocaleString()} KRW`;E.count.textContent=`체결 ${n.toLocaleString()}`;render();queueSave()};ws.onerror=()=>status('연결 오류','down');ws.onclose=()=>{status('재연결 대기','down');setTimeout(()=>connect(),3000)}}
-E.re.onclick=connect;addEventListener('resize',render);document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&(!ws||ws.readyState>1))connect()});if('serviceWorker'in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});if(loadState()){render();E.count.textContent=`체결 ${n.toLocaleString()} · 복원됨`}connect();setInterval(render,1000);addEventListener('beforeunload',saveState);document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')saveState()});
+function vwap20(a){let o=[],q=[],pvS=0,vS=0;for(let b of a){let typ=(b.high+b.low+b.close)/3,vol=+b.volume||0,pv=typ*vol;q.push([pv,vol]);pvS+=pv;vS+=vol;if(q.length>VW){let z=q.shift();pvS-=z[0];vS-=z[1]}o.push(vS?pvS/vS:b.close)}return o}
+function ind(a){let c=a.map(x=>x.close);return{e5:ema(c,5),e10:ema(c,10),e20:ema(c,20),e60:ema(c,60),e120:ema(c,120),vwap:vwap20(a)}}
+function slope(v){if(v.length<LB+1)return{state:'FLAT',pct:0};let n=v.at(-1),b=v[v.length-1-LB],p=b?(n/b-1)*100:0;return{state:p>FLAT?'UP':p<-FLAT?'DOWN':'FLAT',pct:p}}
+function arrows(a,I){let o=[];for(let i=1;i<a.length;i++){let px=a[i].close||1,span=(Math.max(I.e5[i],I.e10[i],I.e20[i])-Math.min(I.e5[i],I.e10[i],I.e20[i]))/px*100;if(span>CONV)continue;let up=I.e5[i-1]<=I.vwap[i-1]&&I.e5[i]>I.vwap[i],dn=I.e5[i-1]>=I.vwap[i-1]&&I.e5[i]<I.vwap[i];if(up)o.push([i,'UP',a[i].low]);if(dn)o.push([i,'DOWN',a[i].high])}return o}
+function sig(){let a=C[240].done;if(a.length<22)return{state:'FLAT',pct:0,label:'WAIT',cls:'wait'};let I=ind(a),i=a.length-1,p=i-1,S=slope(I.vwap),px=a[i].close||1,span=(Math.max(I.e5[i],I.e10[i],I.e20[i])-Math.min(I.e5[i],I.e10[i],I.e20[i]))/px*100,cv=span<=CONV,up=I.e5[p]<=I.vwap[p]&&I.e5[i]>I.vwap[i],dn=I.e5[p]>=I.vwap[p]&&I.e5[i]<I.vwap[i];if(S.state==='UP'&&cv&&up)return{...S,label:'BUY 후보 ↑',cls:'buy'};if(S.state==='DOWN'&&cv&&dn)return{...S,label:'SELL 후보 ↓',cls:'sell'};if(S.state==='UP')return{...S,label:'HOLD / BUY 허가',cls:'buy'};if(S.state==='DOWN')return{...S,label:'BUY 차단 / SELL 관찰',cls:'sell'};return{...S,label:'WAIT',cls:'wait'}}
+function arrow(ctx,x,y,d){ctx.fillStyle=d==='UP'?'#0a8f3c':'#c62828';ctx.beginPath();if(d==='UP'){ctx.moveTo(x,y-12);ctx.lineTo(x-8,y-2);ctx.lineTo(x-3,y-2);ctx.lineTo(x-3,y+8);ctx.lineTo(x+3,y+8);ctx.lineTo(x+3,y-2);ctx.lineTo(x+8,y-2)}else{ctx.moveTo(x,y+12);ctx.lineTo(x-8,y+2);ctx.lineTo(x-3,y+2);ctx.lineTo(x-3,y-8);ctx.lineTo(x+3,y-8);ctx.lineTo(x+3,y+2);ctx.lineTo(x+8,y+2)}ctx.closePath();ctx.fill()}
+function draw(cv,a){let d=Math.max(1,devicePixelRatio||1),r=cv.getBoundingClientRect(),ctx=cv.getContext('2d');cv.width=r.width*d;cv.height=r.height*d;ctx.setTransform(d,0,0,d,0,0);let W=r.width,H=r.height;ctx.clearRect(0,0,W,H);let pad={l:46,r:12,t:12,b:22},pw=W-pad.l-pad.r,ph=H-pad.t-pad.b;if(a.length<2){ctx.fillStyle='#777';ctx.fillText('과거/실시간 체결 준비 중...',18,32);return}a=a.slice(-180);let I=ind(a),v=[];a.forEach(b=>v.push(b.high,b.low));Object.values(I).forEach(s=>s.forEach(x=>Number.isFinite(x)&&v.push(x)));let mn=Math.min(...v),mx=Math.max(...v),ex=(mx-mn)*.08||1;mn-=ex;mx+=ex;let X=i=>pad.l+(i+.5)*(pw/a.length),Y=x=>pad.t+(mx-x)/(mx-mn)*ph;ctx.strokeStyle='#ececec';for(let g=0;g<=5;g++){let yy=pad.t+ph*g/5;ctx.beginPath();ctx.moveTo(pad.l,yy);ctx.lineTo(W-pad.r,yy);ctx.stroke()}let cw=Math.max(2,Math.min(7,pw/a.length*.68));a.forEach((b,i)=>{let up=b.close>=b.open,c=up?'#e65d5d':'#4b82e8';ctx.strokeStyle=c;ctx.fillStyle=c;ctx.beginPath();ctx.moveTo(X(i),Y(b.high));ctx.lineTo(X(i),Y(b.low));ctx.stroke();let yo=Y(b.open),yc=Y(b.close);ctx.fillRect(X(i)-cw/2,Math.min(yo,yc),cw,Math.max(1,Math.abs(yc-yo)))});[['e5','#2f80ed',1.2],['e10','#f2994a',1.2],['e20','#27ae60',1.4],['e60','#eb5757',1.3],['e120','#9b51e0',1.3],['vwap','#8d5a44',2.8]].forEach(([k,c,l])=>{ctx.strokeStyle=c;ctx.lineWidth=l;ctx.setLineDash(k==='vwap'?[7,5]:[]);ctx.beginPath();I[k].forEach((z,i)=>i?ctx.lineTo(X(i),Y(z)):ctx.moveTo(X(i),Y(z)));ctx.stroke();ctx.setLineDash([])});arrows(a,I).forEach(s=>arrow(ctx,X(s[0]),Y(s[2])+(s[1]==='UP'?16:-16),s[1]));ctx.fillStyle='#555';ctx.font='11px sans-serif';ctx.fillText(mx.toFixed(1),3,pad.t+4);ctx.fillText(mn.toFixed(1),3,pad.t+ph)}
+function render(){draw(E.c240,bars(C[240]));draw(E.c960,bars(C[960]));E.p240.textContent=`${C[240].cur?.count||0}/240 · 완성 ${C[240].done.length}`;E.p960.textContent=`${C[960].cur?.count||0}/960 · 완성 ${C[960].done.length}`;let s=sig();E.v.textContent=`VWAP20 ${s.state} ${s.pct>=0?'+':''}${s.pct.toFixed(3)}%`;E.v.className='badge '+(s.state==='UP'?'up':s.state==='DOWN'?'down':'flat');E.sig.textContent=s.label;E.sig.className='signal '+s.cls}
+function add(r){let t={p:+r.trade_price,q:+r.trade_volume||0,s:r.ask_bid||'',ts:+r.timestamp||Date.now(),sid:r.sequential_id??null,seq:seq++};C[240].add(t);C[960].add(t);if(t.sid!=null)lastSid=t.sid}
+function save(){try{localStorage.setItem(KEY,JSON.stringify({v:4,seq,lastSid,b240:C[240],b960:C[960]}));E.save.textContent='자동 저장됨'}catch(e){}}
+function load(){try{let s=JSON.parse(localStorage.getItem(KEY)||'null');if(!s||s.v!==4)return false;seq=s.seq||0;lastSid=s.lastSid??null;Object.assign(C[240],s.b240||{});Object.assign(C[960],s.b960||{});return C[240].done.length||C[960].done.length}catch(e){return false}}
+async function history(target,stop=null,maxPages=300){let rows=[],cursor=null;for(let pg=0;pg<maxPages&&rows.length<target;pg++){let u=new URL(REST);u.searchParams.set('market',M);u.searchParams.set('count',BATCH);if(cursor!=null)u.searchParams.set('cursor',cursor);let r=await fetch(u,{cache:'no-store'});if(!r.ok)throw Error('HTTP '+r.status);let a=await r.json();if(!a.length)break;for(let z of a){if(stop!=null&&String(z.sequential_id)===String(stop)){rows.reverse();return rows}rows.push(z);if(rows.length>=target)break}cursor=a.at(-1)?.sequential_id;E.hist.textContent=`과거체결 ${rows.length.toLocaleString()}/${target.toLocaleString()}`;E.hb.textContent=`${Math.min(100,rows.length/target*100).toFixed(0)}%`;await sleep(DELAY)}rows.reverse();return rows}
+async function prefill(){E.conn.textContent='과거데이터 준비';try{let rows=await history(TARGET);C[240].done=[];C[240].cur=null;C[960].done=[];C[960].cur=null;seq=0;lastSid=null;for(let i=0;i<rows.length;i++){add(rows[i]);if(i%5000===0){E.hist.textContent=`봉 생성 ${i.toLocaleString()}/${rows.length.toLocaleString()}`;render();await sleep(0)}}E.hist.textContent=`과거 ${rows.length.toLocaleString()}건 · 240T ${C[240].done.length}봉 · 960T ${C[960].done.length}봉`;E.hb.textContent='100%';save();render()}catch(e){console.warn(e);E.hist.textContent='과거데이터 실패 · 실시간부터 시작';E.hb.textContent='실패'}}
+async function gap(){if(lastSid==null)return;try{let rows=await history(50000,lastSid,110);rows.forEach(add);if(rows.length){E.hist.textContent=`누락 ${rows.length.toLocaleString()}건 보충`;save();render()}}catch(e){console.warn(e)}}
+async function parse(d){try{if(d instanceof Blob)return JSON.parse(await d.text());if(d instanceof ArrayBuffer)return JSON.parse(new TextDecoder().decode(d));return JSON.parse(d)}catch(e){return null}}
+function connect(){if(ws)try{ws.close()}catch(e){}E.conn.textContent='연결 중';ws=new WebSocket(WS);ws.binaryType='arraybuffer';ws.onopen=()=>{ws.send(JSON.stringify([{ticket:'xrp-v4-'+Date.now()},{type:'trade',codes:[M],is_only_realtime:true},{format:'DEFAULT'}]));E.conn.textContent='실시간 연결';E.conn.className='badge up'};ws.onmessage=async ev=>{let m=await parse(ev.data);if(!m||m.type!=='trade'||m.code!==M)return;if(lastSid!=null&&m.sequential_id!=null&&String(m.sequential_id)===String(lastSid))return;add(m);live++;E.price.textContent=`${(+m.trade_price).toLocaleString()} KRW`;E.count.textContent=`실시간 ${live.toLocaleString()}`;render();clearTimeout(timer);timer=setTimeout(save,1000)};ws.onclose=()=>setTimeout(connect,3000)}
+async function start(){if(load()){E.hist.textContent=`저장 복원 · 240T ${C[240].done.length}봉 · 960T ${C[960].done.length}봉`;E.hb.textContent='100%';render();await gap()}else await prefill();connect()}
+E.re.onclick=async()=>{await gap();connect()};addEventListener('resize',render);document.addEventListener('visibilitychange',async()=>{if(document.visibilityState==='visible'){await gap();if(!ws||ws.readyState>1)connect()}else save()});addEventListener('beforeunload',save);if('serviceWorker'in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});start();setInterval(render,1000);
 })();

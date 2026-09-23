@@ -1,6 +1,6 @@
 {
-  "name": "XRP 실시간 틱차트",
-  "short_name": "XRP Tick",
+  "name": "XRP 실시간 틱차트 v4",
+  "short_name": "XRP Tick v4",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#ffffff",
