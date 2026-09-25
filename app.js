@@ -24,7 +24,9 @@ const VWAP_FLAT_TOL_PCT=0.02;
 
 const STATE_KEY='xrp_v4_3_r11_state';
 const VERSION=43;
-
+const DB_NAME='xrp_v4_3_r11_db';
+const DB_STORE='history';
+   
 const $=id=>document.getElementById(id);
 
 const E={
@@ -873,7 +875,6 @@ function loadState(){
         )||'null'
       );
 
-
     if(
       !state ||
       state.v!==VERSION
@@ -881,13 +882,8 @@ function loadState(){
       return false;
     }
 
-
-    seq=
-      state.seq||0;
-
-    lastSid=
-      state.lastSid??null;
-
+    seq=state.seq||0;
+    lastSid=state.lastSid??null;
 
     Object.assign(
       C[240],
@@ -899,12 +895,10 @@ function loadState(){
       state.b960||{}
     );
 
-
     return !!(
       C[240].done.length ||
       C[960].done.length
     );
-
 
   }catch(e){
 
@@ -912,6 +906,141 @@ function loadState(){
   }
 }
 
+
+function openHistoryDB(){
+
+  return new Promise((resolve,reject)=>{
+
+    const req=
+      indexedDB.open(
+        DB_NAME,
+        1
+      );
+
+    req.onupgradeneeded=()=>{
+
+      const db=req.result;
+
+      if(
+        !db.objectStoreNames.contains(
+          DB_STORE
+        )
+      ){
+        db.createObjectStore(
+          DB_STORE
+        );
+      }
+    };
+
+    req.onsuccess=()=>resolve(req.result);
+
+    req.onerror=()=>reject(req.error);
+  });
+}
+
+
+async function loadHistoryState(){
+
+  const db=
+    await openHistoryDB();
+
+  return new Promise((resolve,reject)=>{
+
+    const tx=
+      db.transaction(
+        DB_STORE,
+        'readonly'
+      );
+
+    const store=
+      tx.objectStore(
+        DB_STORE
+      );
+
+    const req=
+      store.get('main');
+
+    req.onsuccess=()=>{
+
+      const data=req.result;
+
+      if(
+        data &&
+        Array.isArray(data.rows)
+      ){
+
+        resolve({
+          rows:data.rows,
+          meta:
+            data.meta || {
+              loaded:data.rows.length,
+              cursor:null,
+              done:false
+            }
+        });
+
+      }else{
+
+        resolve({
+          rows:[],
+          meta:{
+            loaded:0,
+            cursor:null,
+            done:false
+          }
+        });
+      }
+    };
+
+    req.onerror=()=>reject(req.error);
+  });
+}
+
+
+async function saveHistoryState(
+  rows,
+  meta
+){
+
+  const db=
+    await openHistoryDB();
+
+  return new Promise((resolve,reject)=>{
+
+    const tx=
+      db.transaction(
+        DB_STORE,
+        'readwrite'
+      );
+
+    const store=
+      tx.objectStore(
+        DB_STORE
+      );
+
+    store.put(
+      {
+        rows:
+          rows.slice(
+            0,
+            TOTAL_TARGET
+          ),
+
+        meta
+      },
+      'main'
+    );
+
+    tx.oncomplete=()=>
+      resolve(true);
+
+    tx.onerror=()=>
+      reject(tx.error);
+
+    tx.onabort=()=>
+      reject(tx.error);
+  });
+}
 
 /* =========================================================
    CLOUDFLARE WORKER REST
@@ -932,7 +1061,6 @@ async function fetchPage(cursor=null){
     String(PAGE_SIZE)
   );
 
-
   if(cursor!=null){
 
     u.searchParams.set(
@@ -940,7 +1068,6 @@ async function fetchPage(cursor=null){
       String(cursor)
     );
   }
-
 
   const response=
     await fetch(
@@ -950,7 +1077,6 @@ async function fetchPage(cursor=null){
       }
     );
 
-
   if(!response.ok){
 
     throw new Error(
@@ -959,10 +1085,8 @@ async function fetchPage(cursor=null){
     );
   }
 
-
   return await response.json();
 }
-
 
 /* =========================================================
    INITIAL 120,000 TRADE PREFILL
@@ -974,61 +1098,114 @@ async function prefill(){
 
   historyLoading=true;
 
-
-  E.conn.textContent=
-    '과거데이터 준비';
-
+  E.conn.textContent='과거데이터 준비';
 
   let rows=[];
-  let cursor=null;
+  let meta={
+    loaded:0,
+    cursor:null,
+    done:false
+  };
 
+  let cursor=null;
 
   try{
 
-    const maxPages=
-      Math.ceil(
-        TOTAL_TARGET/PAGE_SIZE
-      )+10;
+    const saved=
+      await loadHistoryState();
 
+    rows=
+      Array.isArray(saved?.rows)
+        ? saved.rows
+        : [];
 
-    for(
-      let page=0;
-      page<maxPages &&
-      rows.length<TOTAL_TARGET;
-      page++
+    meta=
+      saved?.meta &&
+      typeof saved.meta==='object'
+        ? saved.meta
+        : {
+            loaded:rows.length,
+            cursor:null,
+            done:false
+          };
+
+    if(
+      rows.length===0 &&
+      meta.loaded>0
+    ){
+      meta={
+        loaded:0,
+        cursor:null,
+        done:false
+      };
+    }
+
+    if(
+      rows.length>=TOTAL_TARGET
+    ){
+
+      rows=
+        rows.slice(
+          0,
+          TOTAL_TARGET
+        );
+
+      meta={
+        loaded:rows.length,
+        cursor:
+          meta.cursor??null,
+        done:true
+      };
+    }
+
+    cursor=
+      meta.cursor??null;
+
+    E.hist.textContent=
+      `과거체결 ${rows.length.toLocaleString()}/${TOTAL_TARGET.toLocaleString()}`;
+
+    E.hb.textContent=
+      `${Math.min(
+        100,
+        rows.length/TOTAL_TARGET*100
+      ).toFixed(0)}%`;
+
+    while(
+      rows.length<TOTAL_TARGET &&
+      !meta.done
     ){
 
       const data=
         await fetchPage(cursor);
 
-
       if(
         !Array.isArray(data) ||
-        !data.length
+        data.length===0
       ){
+
+        meta={
+          loaded:rows.length,
+          cursor,
+          done:true
+        };
+
+        await saveHistoryState(
+          rows,
+          meta
+        );
+
         break;
       }
-
 
       for(const r of data){
 
         rows.push({
-          trade_price:
-            r.trade_price,
-
-          trade_volume:
-            r.trade_volume,
-
-          ask_bid:
-            r.ask_bid,
-
-          timestamp:
-            r.timestamp,
-
-          sequential_id:
-            r.sequential_id
+          trade_price:r.trade_price,
+          trade_volume:r.trade_volume,
+          ask_bid:r.ask_bid,
+          timestamp:r.timestamp,
+          sequential_id:r.sequential_id
         });
-
 
         if(
           rows.length>=TOTAL_TARGET
@@ -1037,93 +1214,127 @@ async function prefill(){
         }
       }
 
-
       cursor=
         data.at(-1)
-          ?.sequential_id;
+          ?.sequential_id
+        ?? cursor;
 
+      meta={
+        loaded:rows.length,
+        cursor,
+        done:
+          rows.length>=TOTAL_TARGET
+      };
+
+      await saveHistoryState(
+        rows,
+        meta
+      );
 
       E.hist.textContent=
         `과거체결 ${rows.length.toLocaleString()}/${TOTAL_TARGET.toLocaleString()}`;
 
-
       E.hb.textContent=
         `${Math.min(
           100,
-          rows.length/
-          TOTAL_TARGET*100
+          rows.length/TOTAL_TARGET*100
         ).toFixed(0)}%`;
-
 
       await sleep(
         DELAY_MS
       );
     }
 
+    if(rows.length){
 
-    /* API: 최신 → 과거
-       차트: 과거 → 최신 */
+      const ordered=
+        rows
+          .slice(
+            0,
+            TOTAL_TARGET
+          )
+          .reverse();
 
-    rows.reverse();
+      C[240].reset();
+      C[960].reset();
 
+      seq=0;
+      lastSid=null;
 
-    C[240].reset();
-    C[960].reset();
+      for(
+        let i=0;
+        i<ordered.length;
+        i++
+      ){
 
-    seq=0;
-    lastSid=null;
+        add(
+          ordered[i]
+        );
 
+        if(
+          i%5000===0
+        ){
 
-    for(
-      let i=0;
-      i<rows.length;
-      i++
-    ){
+          E.hist.textContent=
+            `봉 생성 ${i.toLocaleString()}/${ordered.length.toLocaleString()}`;
 
-      add(rows[i]);
+          render();
 
-
-      if(i%5000===0){
-
-        E.hist.textContent=
-          `봉 생성 ${i.toLocaleString()}/${rows.length.toLocaleString()}`;
-
-        render();
-
-        await sleep(0);
+          await sleep(0);
+        }
       }
+
+      saveState();
+
+      render();
+
+      const pct=
+        Math.min(
+          100,
+          ordered.length/
+          TOTAL_TARGET*
+          100
+        );
+
+      E.hist.textContent=
+        `과거 ${ordered.length.toLocaleString()}건 · 240T ${C[240].done.length}봉 · 960T ${C[960].done.length}봉`;
+
+      E.hb.textContent=
+        `${pct.toFixed(0)}%`;
     }
-
-
-    saveState();
-
-    render();
-
-
-    E.hist.textContent=
-      `과거 ${rows.length.toLocaleString()}건 · 240T ${C[240].done.length}봉 · 960T ${C[960].done.length}봉`;
-
-
-    E.hb.textContent=
-      `${Math.min(
-        100,
-        rows.length/
-        TOTAL_TARGET*100
-      ).toFixed(0)}%`;
-
 
   }catch(e){
 
     console.warn(e);
 
+    try{
+
+      await saveHistoryState(
+        rows,
+        {
+          loaded:rows.length,
+          cursor,
+          done:false
+        }
+      );
+
+    }catch(saveError){
+
+      console.warn(
+        'IndexedDB save failed',
+        saveError
+      );
+    }
+
     E.hist.textContent=
-      `과거데이터 일시중단 · ${rows.length.toLocaleString()}건`;
+      `과거 로딩 일시중단 · 저장 ${rows.length.toLocaleString()}건`;
 
     E.hb.textContent=
       `${Math.min(
         100,
         rows.length/
-        TOTAL_TARGET*100
+        TOTAL_TARGET*
+        100
       ).toFixed(0)}%`;
 
   }finally{
@@ -1131,7 +1342,6 @@ async function prefill(){
     historyLoading=false;
   }
 }
-
 
 /* =========================================================
    GAP BACKFILL
@@ -1410,31 +1620,62 @@ async function start(){
   const restored=
     loadState();
 
+  let historyState={
+    rows:[],
+    meta:{
+      loaded:0,
+      cursor:null,
+      done:false
+    }
+  };
+
+  try{
+
+    historyState=
+      await loadHistoryState();
+
+  }catch(e){
+
+    console.warn(
+      'IndexedDB load failed',
+      e
+    );
+  }
+
+  const history=
+    Array.isArray(
+      historyState?.rows
+    )
+      ? historyState.rows
+      : [];
 
   if(restored){
 
     E.hist.textContent=
-      `저장 복원 · 240T ${C[240].done.length}봉 · 960T ${C[960].done.length}봉`;
+      `저장 복원 · 과거체결 ${history.length.toLocaleString()}/${TOTAL_TARGET.toLocaleString()} · 240T ${C[240].done.length}봉 · 960T ${C[960].done.length}봉`;
 
     E.hb.textContent=
-      '100%';
+      `${Math.min(
+        100,
+        history.length/
+        TOTAL_TARGET*
+        100
+      ).toFixed(0)}%`;
 
     render();
-
-    await backfillGap();
-
-  }else{
-
-    await prefill();
-
-    await backfillGap();
   }
 
+  if(
+    history.length<TOTAL_TARGET
+  ){
+
+    await prefill();
+  }
+
+  await backfillGap();
 
   connect();
 }
-
-
 /* =========================================================
    EVENTS
    ========================================================= */
