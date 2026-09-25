@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#ffffff">
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon.svg">
-<title>XRP 실시간 틱차트 v4.2</title>
+<title>XRP 실시간 틱차트 v4.3 R11</title>
 <style>
 *{box-sizing:border-box}html,body{margin:0;background:#fff;color:#111;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
 header{position:sticky;top:0;z-index:5;background:#fff;border-bottom:1px solid #ddd;padding:8px 10px}
@@ -22,7 +22,7 @@ canvas{display:block;width:100%;height:42vh;min-height:300px}.legend{padding:2px
 <body>
 <header>
 <div class="row">
-<h1>XRP 실시간 틱차트 v4.2</h1>
+<h1>XRP 실시간 틱차트 v4.3 R11</h1>
 <span id="conn" class="badge flat">연결 대기</span>
 <span id="price" class="badge">가격 -</span>
 <span id="count" class="badge">실시간 0</span>
@@ -31,15 +31,15 @@ canvas{display:block;width:100%;height:42vh;min-height:300px}.legend{padding:2px
 </div>
 <div class="row" style="margin-top:6px">
 <span id="vwapState" class="badge flat">VWAP -</span>
-<span id="signal" class="signal wait">WAIT</span>
+<span id="signal" class="signal wait">VWAP COLOR ONLY</span>
 <span id="history" class="badge">과거데이터 준비</span>
 <span id="histbar" class="badge">0%</span>
 <span class="badge">READ ONLY · NO ORDER</span>
 </div>
 </header>
 <main>
-<section class="wrap"><div class="head"><b>XRP 960T</b><span id="p960">0/960</span></div><canvas id="c960"></canvas><div class="legend">EMA5 · EMA10 · EMA20 · EMA60 · EMA120 · VWAP20(PC R4 방식)</div></section>
-<section class="wrap"><div class="head"><b>XRP 240T</b><span id="p240">0/240</span></div><canvas id="c240"></canvas><div class="legend">EMA5 · EMA10 · EMA20 · EMA60 · EMA120 · VWAP20(PC R4 방식)</div></section>
+<section class="wrap"><div class="head"><b>XRP 960T</b><span id="p960">0/960</span></div><canvas id="c960"></canvas><div class="legend">EMA5 · EMA10 · EMA20 · EMA60 · EMA120 · VWAP20 · 상승 청록 · 하락 빨강 · 평탄 노랑 점선</div></section>
+<section class="wrap"><div class="head"><b>XRP 240T</b><span id="p240">0/240</span></div><canvas id="c240"></canvas><div class="legend">EMA5 · EMA10 · EMA20 · EMA60 · EMA120 · VWAP20 · 상승 청록 · 하락 빨강 · 평탄 노랑 점선</div></section>
 </main>
 <script src="app.js"></script>
 </body></html>
