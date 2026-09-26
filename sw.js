@@ -1,4 +1,4 @@
-const C='xrp-tick-pwa-v4-3-r11-idb2-zoom';
+const C='xrp-tick-pwa-v4-3-r11-idb3-pcmouse';
 const A=[
   './',
   './index.html',
