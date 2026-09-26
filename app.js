@@ -808,34 +808,112 @@ const trend=
      960T / 240T 각각 자기 값 표시
      ===================================================== */
 
-  const latestTrendPct=
-    fullTrend.at(-1);
+ const latestTrendPct=
+  fullTrend.at(-1);
 
-  const latestTrendState=
-    trendState(
-      latestTrendPct
-    );
+const previousTrendPct=
+  fullTrend.at(-2);
 
-  const tickLabel=
-    canvas===E.c960
-      ? '960T'
-      : '240T';
 
-  const pctLabel=
-    Number.isFinite(
-      latestTrendPct
-    )
-      ? (
-          latestTrendPct>=0
-            ? '+'
-            : ''
-        )+
-        latestTrendPct.toFixed(3)+
-        '%'
-      : '-';
+const latestTrendState=
+  trendState(
+    latestTrendPct
+  );
 
-  const overlayText=
-    `${tickLabel} VWAP20 ${latestTrendState} ${pctLabel}`;
+const previousTrendState=
+  trendState(
+    previousTrendPct
+  );
+
+
+const tickLabel=
+  canvas===E.c960
+    ? '960T'
+    : '240T';
+
+
+const pctLabel=
+  Number.isFinite(
+    latestTrendPct
+  )
+    ? (
+        latestTrendPct>=0
+          ? '+'
+          : ''
+      )+
+      latestTrendPct.toFixed(3)+
+      '%'
+    : '-';
+
+
+let momentumLabel=
+  '유지';
+
+
+if(
+  Number.isFinite(
+    latestTrendPct
+  ) &&
+  Number.isFinite(
+    previousTrendPct
+  )
+){
+
+  if(
+    latestTrendState!==
+    previousTrendState
+  ){
+
+    momentumLabel=
+      '전환';
+
+  }else if(
+    latestTrendState==='DOWN'
+  ){
+
+    if(
+      latestTrendPct<
+      previousTrendPct
+    ){
+
+      momentumLabel=
+        '↓강화';
+
+    }else if(
+      latestTrendPct>
+      previousTrendPct
+    ){
+
+      momentumLabel=
+        '↑둔화';
+    }
+
+  }else if(
+    latestTrendState==='UP'
+  ){
+
+    if(
+      latestTrendPct>
+      previousTrendPct
+    ){
+
+      momentumLabel=
+        '↑강화';
+
+    }else if(
+      latestTrendPct<
+      previousTrendPct
+    ){
+
+      momentumLabel=
+        '↓둔화';
+    }
+  }
+}
+
+
+const overlayText=
+  `${tickLabel} VWAP20 ${latestTrendState} ${pctLabel} ${momentumLabel}`;
 
 
   ctx.save();
