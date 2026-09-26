@@ -1,4 +1,5 @@
-const C='xrp-tick-pwa-v4-3-r11-idb5-vwapmomentum';
+const C='xrp-tick-pwa-v4-3-r11-idb6-vwapcolors';
+
 const A=[
   './',
   './index.html',
