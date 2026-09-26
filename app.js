@@ -912,55 +912,197 @@ if(
 }
 
 
-const overlayText=
-  `${tickLabel} VWAP20 ${latestTrendState} ${pctLabel} ${momentumLabel}`;
+const prefixText=
+  `${tickLabel} VWAP20 `;
+
+const statusText=
+  `${latestTrendState} ${pctLabel}`;
+
+const momentumText=
+  ` ${momentumLabel}`;
 
 
-  ctx.save();
+ctx.save();
 
-  ctx.font=
-    'bold 17px Arial';
+ctx.font=
+  'bold 17px Arial';
 
-  ctx.textAlign=
-    'right';
+ctx.textAlign=
+  'left';
 
-  ctx.textBaseline=
-    'top';
-
-
-  const textWidth=
-    ctx.measureText(
-      overlayText
-    ).width;
-
-  const textX=
-    W-pad.r-8;
-
-  const textY=
-    pad.t+5;
+ctx.textBaseline=
+  'top';
 
 
-  ctx.fillStyle=
-    'rgba(255,255,255,0.88)';
+const prefixWidth=
+  ctx.measureText(
+    prefixText
+  ).width;
 
-  ctx.fillRect(
-    textX-textWidth-8,
-    textY-3,
-    textWidth+16,
-    25
-  );
+const statusWidth=
+  ctx.measureText(
+    statusText
+  ).width;
+
+const momentumWidth=
+  ctx.measureText(
+    momentumText
+  ).width;
+
+const totalWidth=
+  prefixWidth+
+  statusWidth+
+  momentumWidth;
 
 
-  ctx.fillStyle=
-    '#d32f2f';
+const textX=
+  W-pad.r-8-totalWidth;
 
-  ctx.fillText(
-    overlayText,
-    textX,
+const textY=
+  pad.t+5;
+
+
+/* 흰색 배경 */
+
+ctx.fillStyle=
+  'rgba(255,255,255,0.90)';
+
+ctx.fillRect(
+  textX-8,
+  textY-3,
+  totalWidth+16,
+  25
+);
+
+
+/* 960T / 240T + VWAP20 */
+
+ctx.fillStyle=
+  '#333333';
+
+ctx.fillText(
+  prefixText,
+  textX,
+  textY
+);
+
+
+/* 현재 VWAP 방향 + 수치 */
+
+let stateColor=
+  FLAT_COLOR;
+
+if(
+  latestTrendState==='UP'
+){
+  stateColor=
+    UP_COLOR;
+
+}else if(
+  latestTrendState==='DOWN'
+){
+  stateColor=
+    DOWN_COLOR;
+}
+
+
+const statusX=
+  textX+
+  prefixWidth;
+
+
+/* FLAT 노랑 글씨 외곽선 */
+
+if(
+  latestTrendState==='FLAT'
+){
+
+  ctx.strokeStyle=
+    'rgba(80,80,80,0.55)';
+
+  ctx.lineWidth=2;
+
+  ctx.strokeText(
+    statusText,
+    statusX,
     textY
   );
+}
 
-  ctx.restore(); 
+
+ctx.fillStyle=
+  stateColor;
+
+ctx.fillText(
+  statusText,
+  statusX,
+  textY
+);
+
+
+/* 강화 / 둔화 / 전환 */
+
+let momentumColor=
+  '#777777';
+
+
+if(
+  momentumLabel==='↑강화'
+){
+  momentumColor=
+    UP_COLOR;
+
+}else if(
+  momentumLabel==='↓강화'
+){
+  momentumColor=
+    DOWN_COLOR;
+
+}else if(
+  momentumLabel==='↑둔화' ||
+  momentumLabel==='↓둔화' ||
+  momentumLabel==='전환'
+){
+  momentumColor=
+    FLAT_COLOR;
+}
+
+
+const momentumX=
+  statusX+
+  statusWidth;
+
+
+/* 노랑 표시 외곽선 */
+
+if(
+  momentumColor===FLAT_COLOR
+){
+
+  ctx.strokeStyle=
+    'rgba(80,80,80,0.55)';
+
+  ctx.lineWidth=2;
+
+  ctx.strokeText(
+    momentumText,
+    momentumX,
+    textY
+  );
+}
+
+
+ctx.fillStyle=
+  momentumColor;
+
+ctx.fillText(
+  momentumText,
+  momentumX,
+  textY
+);
+
+
+ctx.restore();
 }
 
 
