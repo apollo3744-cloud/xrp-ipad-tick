@@ -410,8 +410,23 @@ view.offset=
     )
   );
 
+const fullBars=
+  bars;
+
+const fullI=
+  indicators(
+    fullBars
+  );
+
+const fullTrend=
+  vwapTrendSeries(
+    fullI.vwap
+  );
+
+
 const end=
-  bars.length-view.offset;
+  fullBars.length-
+  view.offset;
 
 const start=
   Math.max(
@@ -419,19 +434,59 @@ const start=
     end-visible
   );
 
+
 bars=
-  bars.slice(
+  fullBars.slice(
     start,
     end
-  ); 
+  );
 
 
-  const I=
-    indicators(bars);
+const I={
 
-  const trend=
-    vwapTrendSeries(I.vwap);
+  e5:
+    fullI.e5.slice(
+      start,
+      end
+    ),
 
+  e10:
+    fullI.e10.slice(
+      start,
+      end
+    ),
+
+  e20:
+    fullI.e20.slice(
+      start,
+      end
+    ),
+
+  e60:
+    fullI.e60.slice(
+      start,
+      end
+    ),
+
+  e120:
+    fullI.e120.slice(
+      start,
+      end
+    ),
+
+  vwap:
+    fullI.vwap.slice(
+      start,
+      end
+    )
+};
+
+
+const trend=
+  fullTrend.slice(
+    start,
+    end
+  );
 
   const values=[];
 
@@ -1926,6 +1981,165 @@ function setupChartGestures(
       render();
     }
   );
+     /* =====================================================
+     PC MOUSE WHEEL ZOOM
+     아이패드 터치와 분리
+     ===================================================== */
+
+  canvas.addEventListener(
+    'wheel',
+    e=>{
+
+      e.preventDefault();
+
+      const factor=
+        e.deltaY<0
+          ? 0.85
+          : 1.15;
+
+      view.visible=
+        Math.round(
+          view.visible*
+          factor
+        );
+
+      view.visible=
+        Math.max(
+          MIN_VISIBLE,
+          Math.min(
+            MAX_VISIBLE,
+            view.visible
+          )
+        );
+
+      render();
+    },
+    {
+      passive:false
+    }
+  );
+
+
+  /* =====================================================
+     PC MOUSE DRAG
+     pointerType === 'mouse' 일 때만 작동
+     ===================================================== */
+
+  let mouseDragging=false;
+  let mouseStartX=0;
+  let mouseStartOffset=0;
+
+
+  canvas.addEventListener(
+    'pointerdown',
+    e=>{
+
+      if(
+        e.pointerType!=='mouse' ||
+        e.button!==0
+      ){
+        return;
+      }
+
+      mouseDragging=true;
+
+      mouseStartX=
+        e.clientX;
+
+      mouseStartOffset=
+        view.offset;
+
+      canvas.setPointerCapture(
+        e.pointerId
+      );
+
+      canvas.style.cursor=
+        'grabbing';
+    }
+  );
+
+
+  canvas.addEventListener(
+    'pointermove',
+    e=>{
+
+      if(
+        e.pointerType!=='mouse' ||
+        !mouseDragging
+      ){
+        return;
+      }
+
+      const rect=
+        canvas.getBoundingClientRect();
+
+      const dx=
+        e.clientX-
+        mouseStartX;
+
+      const barsPerPixel=
+        view.visible/
+        Math.max(
+          1,
+          rect.width
+        );
+
+      const barShift=
+        Math.round(
+          -dx*
+          barsPerPixel
+        );
+
+      view.offset=
+        Math.max(
+          0,
+          mouseStartOffset+
+          barShift
+        );
+
+      render();
+    }
+  );
+
+
+  canvas.addEventListener(
+    'pointerup',
+    e=>{
+
+      if(
+        e.pointerType!=='mouse'
+      ){
+        return;
+      }
+
+      mouseDragging=false;
+
+      canvas.style.cursor=
+        'grab';
+    }
+  );
+
+
+  canvas.addEventListener(
+    'pointercancel',
+    e=>{
+
+      if(
+        e.pointerType!=='mouse'
+      ){
+        return;
+      }
+
+      mouseDragging=false;
+
+      canvas.style.cursor=
+        'grab';
+    }
+  );
+
+
+  canvas.style.cursor=
+    'grab';
 }
 
 
