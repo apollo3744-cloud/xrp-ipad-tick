@@ -803,6 +803,86 @@ const trend=
     3,
     pad.t+plotH
   );
+    /* =====================================================
+     VWAP20 STATUS - CHART TOP RIGHT
+     960T / 240T 각각 자기 값 표시
+     ===================================================== */
+
+  const latestTrendPct=
+    fullTrend.at(-1);
+
+  const latestTrendState=
+    trendState(
+      latestTrendPct
+    );
+
+  const tickLabel=
+    canvas===E.c960
+      ? '960T'
+      : '240T';
+
+  const pctLabel=
+    Number.isFinite(
+      latestTrendPct
+    )
+      ? (
+          latestTrendPct>=0
+            ? '+'
+            : ''
+        )+
+        latestTrendPct.toFixed(3)+
+        '%'
+      : '-';
+
+  const overlayText=
+    `${tickLabel} VWAP20 ${latestTrendState} ${pctLabel}`;
+
+
+  ctx.save();
+
+  ctx.font=
+    'bold 17px Arial';
+
+  ctx.textAlign=
+    'right';
+
+  ctx.textBaseline=
+    'top';
+
+
+  const textWidth=
+    ctx.measureText(
+      overlayText
+    ).width;
+
+  const textX=
+    W-pad.r-8;
+
+  const textY=
+    pad.t+5;
+
+
+  ctx.fillStyle=
+    'rgba(255,255,255,0.88)';
+
+  ctx.fillRect(
+    textX-textWidth-8,
+    textY-3,
+    textWidth+16,
+    25
+  );
+
+
+  ctx.fillStyle=
+    '#d32f2f';
+
+  ctx.fillText(
+    overlayText,
+    textX,
+    textY
+  );
+
+  ctx.restore(); 
 }
 
 
