@@ -51,7 +51,19 @@ let seq=0;
 let lastSid=null;
 let saveTimer=null;
 let historyLoading=false;
+const VIEW={
+  240:{
+    visible:180,
+    offset:0
+  },
+  960:{
+    visible:180,
+    offset:0
+  }
+};
 
+const MIN_VISIBLE=40;
+const MAX_VISIBLE=500;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 
 
@@ -369,8 +381,49 @@ function draw(canvas,bars){
   }
 
 
-  bars=
-    bars.slice(-180);
+const view=
+  canvas===E.c240
+    ? VIEW[240]
+    : VIEW[960];
+
+const visible=
+  Math.max(
+    MIN_VISIBLE,
+    Math.min(
+      MAX_VISIBLE,
+      view.visible
+    )
+  );
+
+const maxOffset=
+  Math.max(
+    0,
+    bars.length-visible
+  );
+
+view.offset=
+  Math.max(
+    0,
+    Math.min(
+      maxOffset,
+      view.offset
+    )
+  );
+
+const end=
+  bars.length-view.offset;
+
+const start=
+  Math.max(
+    0,
+    end-visible
+  );
+
+bars=
+  bars.slice(
+    start,
+    end
+  ); 
 
 
   const I=
@@ -1679,7 +1732,212 @@ async function start(){
 /* =========================================================
    EVENTS
    ========================================================= */
+function setupChartGestures(
+  canvas,
+  tickSize
+){
 
+  const view=
+    VIEW[tickSize];
+
+  let pinchStartDistance=0;
+  let pinchStartVisible=180;
+
+  let dragStartX=0;
+  let dragStartOffset=0;
+  let dragging=false;
+
+  function touchDistance(touches){
+
+    const dx=
+      touches[0].clientX-
+      touches[1].clientX;
+
+    const dy=
+      touches[0].clientY-
+      touches[1].clientY;
+
+    return Math.hypot(
+      dx,
+      dy
+    );
+  }
+
+
+  canvas.style.touchAction='none';
+
+
+  canvas.addEventListener(
+    'touchstart',
+    e=>{
+
+      if(e.touches.length===2){
+
+        pinchStartDistance=
+          touchDistance(
+            e.touches
+          );
+
+        pinchStartVisible=
+          view.visible;
+
+        dragging=false;
+
+        e.preventDefault();
+
+        return;
+      }
+
+      if(e.touches.length===1){
+
+        dragStartX=
+          e.touches[0].clientX;
+
+        dragStartOffset=
+          view.offset;
+
+        dragging=true;
+      }
+
+    },
+    {
+      passive:false
+    }
+  );
+
+
+  canvas.addEventListener(
+    'touchmove',
+    e=>{
+
+      if(e.touches.length===2){
+
+        const distance=
+          touchDistance(
+            e.touches
+          );
+
+        if(
+          pinchStartDistance>0
+        ){
+
+          const scale=
+            distance/
+            pinchStartDistance;
+
+          const nextVisible=
+            Math.round(
+              pinchStartVisible/
+              scale
+            );
+
+          view.visible=
+            Math.max(
+              MIN_VISIBLE,
+              Math.min(
+                MAX_VISIBLE,
+                nextVisible
+              )
+            );
+
+          render();
+        }
+
+        e.preventDefault();
+
+        return;
+      }
+
+
+      if(
+        e.touches.length===1 &&
+        dragging
+      ){
+
+        const rect=
+          canvas.getBoundingClientRect();
+
+        const dx=
+          e.touches[0].clientX-
+          dragStartX;
+
+        const barsPerPixel=
+          view.visible/
+          Math.max(
+            1,
+            rect.width
+          );
+
+        const barShift=
+          Math.round(
+            -dx*
+            barsPerPixel
+          );
+
+        view.offset=
+          Math.max(
+            0,
+            dragStartOffset+
+            barShift
+          );
+
+        render();
+
+        e.preventDefault();
+      }
+
+    },
+    {
+      passive:false
+    }
+  );
+
+
+  canvas.addEventListener(
+    'touchend',
+    e=>{
+
+      if(
+        e.touches.length<2
+      ){
+        pinchStartDistance=0;
+      }
+
+      if(
+        e.touches.length===0
+      ){
+        dragging=false;
+      }
+
+    },
+    {
+      passive:false
+    }
+  );
+
+
+  canvas.addEventListener(
+    'dblclick',
+    ()=>{
+
+      view.visible=180;
+      view.offset=0;
+
+      render();
+    }
+  );
+}
+
+
+setupChartGestures(
+  E.c240,
+  240
+);
+
+setupChartGestures(
+  E.c960,
+  960
+);
 E.re.onclick=
   async()=>{
 
