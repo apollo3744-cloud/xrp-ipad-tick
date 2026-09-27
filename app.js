@@ -55,6 +55,9 @@ let seq=0;
 let lastSid=null;
 let saveTimer=null;
 let historyLoading=false;
+   let reconnectBackfill=false;
+let reconnectBuffer=[];
+let reconnectTimer=null;
 const VIEW={
   240:{
     visible:180,
@@ -1765,7 +1768,7 @@ async function prefill(){
 
 async function backfillGap(){
 
-  if(lastSid==null)return;
+  if(lastSid==null)return [];
 
 
   try{
@@ -1841,6 +1844,10 @@ async function backfillGap(){
       render();
     }
 
+    return rows
+      .filter(r=>r.sequential_id!=null)
+      .map(r=>String(r.sequential_id));
+
 
   }catch(e){
 
@@ -1848,6 +1855,8 @@ async function backfillGap(){
 
     E.hist.textContent=
       '누락 보충 실패 · 실시간 계속';
+
+    return [];
   }
 }
 
@@ -1891,7 +1900,15 @@ async function parseMessage(data){
 
 function connect(){
 
+  if(reconnectTimer){
+
+    clearTimeout(reconnectTimer);
+    reconnectTimer=null;
+  }
+
   if(ws){
+
+    ws.onclose=null;
 
     try{
       ws.close();
@@ -1903,17 +1920,21 @@ function connect(){
     '연결 중';
 
 
-  ws=
+  const socket=
     new WebSocket(WS);
 
+  ws=socket;
 
-  ws.binaryType=
+
+  socket.binaryType=
     'arraybuffer';
 
 
-  ws.onopen=()=>{
+  socket.onopen=()=>{
 
-    ws.send(
+    if(ws!==socket)return;
+
+    socket.send(
       JSON.stringify([
         {
           ticket:
@@ -1940,8 +1961,10 @@ function connect(){
   };
 
 
-  ws.onmessage=
+  socket.onmessage=
     async event=>{
+
+      if(ws!==socket)return;
 
       const m=
         await parseMessage(
@@ -1972,7 +1995,14 @@ function connect(){
       }
 
 
-      add(m);
+      if(reconnectBackfill){
+
+        reconnectBuffer.push(m);
+
+      }else{
+
+        add(m);
+      }
 
       liveCount++;
 
@@ -2003,7 +2033,9 @@ function connect(){
     };
 
 
-  ws.onclose=()=>{
+  socket.onclose=()=>{
+
+    if(ws!==socket)return;
 
     E.conn.textContent=
       '재연결 대기';
@@ -2012,19 +2044,64 @@ function connect(){
       'badge flat';
 
 
-    setTimeout(
-      connect,
-      3000
-    );
+    reconnectTimer=
+      setTimeout(
+        async()=>{
+
+          if(ws!==socket)return;
+
+          reconnectBackfill=true;
+          reconnectBuffer=[];
+
+          connect();
+
+          let backfilledSids=[];
+
+          try{
+
+            backfilledSids=
+              await backfillGap();
+
+          }finally{
+
+            const buffered=
+              reconnectBuffer.slice();
+
+            reconnectBuffer=[];
+            reconnectBackfill=false;
+
+            const seen=
+              new Set(
+                backfilledSids||[]
+              );
+
+            buffered
+              .filter(m=>
+                m.sequential_id==null ||
+                !seen.has(
+                  String(m.sequential_id)
+                )
+              )
+              .forEach(add);
+
+            saveState();
+            render();
+          }
+        },
+        3000
+      );
   };
 
 
-  ws.onerror=()=>{
+  socket.onerror=()=>{
+
+    if(ws!==socket)return;
 
     E.conn.textContent=
       '연결 오류';
   };
 }
+
 
 
 /* =========================================================
@@ -2463,9 +2540,43 @@ setupChartGestures(
 E.re.onclick=
   async()=>{
 
-    await backfillGap();
+    reconnectBackfill=true;
+    reconnectBuffer=[];
 
     connect();
+
+    let backfilledSids=[];
+
+    try{
+
+      backfilledSids=
+        await backfillGap();
+
+    }finally{
+
+      const buffered=
+        reconnectBuffer.slice();
+
+      reconnectBuffer=[];
+      reconnectBackfill=false;
+
+      const seen=
+        new Set(
+          backfilledSids||[]
+        );
+
+      buffered
+        .filter(m=>
+          m.sequential_id==null ||
+          !seen.has(
+            String(m.sequential_id)
+          )
+        )
+        .forEach(add);
+
+      saveState();
+      render();
+    }
   };
 
 
@@ -2484,8 +2595,8 @@ document.addEventListener(
       'visible'
     ){
 
-      await backfillGap();
-
+      reconnectBackfill=true;
+      reconnectBuffer=[];
 
       if(
         !ws ||
@@ -2494,13 +2605,45 @@ document.addEventListener(
         connect();
       }
 
+      let backfilledSids=[];
+
+      try{
+
+        backfilledSids=
+          await backfillGap();
+
+      }finally{
+
+        const buffered=
+          reconnectBuffer.slice();
+
+        reconnectBuffer=[];
+        reconnectBackfill=false;
+
+        const seen=
+          new Set(
+            backfilledSids||[]
+          );
+
+        buffered
+          .filter(m=>
+            m.sequential_id==null ||
+            !seen.has(
+              String(m.sequential_id)
+            )
+          )
+          .forEach(add);
+
+        saveState();
+        render();
+      }
+
     }else{
 
       saveState();
     }
   }
 );
-
 
 addEventListener(
   'beforeunload',
