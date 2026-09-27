@@ -15,7 +15,7 @@ const TOTAL_TARGET=120000;
 const PAGE_SIZE=200;
 const DELAY_MS=350;
 const MAX_BARS=620;
-const RIGHT_GAP_BARS=22;
+const RIGHT_GAP_BARS=12;
 
 const VWAP_WINDOW=20;
 
