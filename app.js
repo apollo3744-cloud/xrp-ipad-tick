@@ -15,6 +15,7 @@ const TOTAL_TARGET=120000;
 const PAGE_SIZE=200;
 const DELAY_MS=350;
 const MAX_BARS=620;
+const RIGHT_GAP_BARS=22;
 
 const VWAP_WINDOW=20;
 
@@ -525,10 +526,14 @@ const trend=
   max+=extra;
 
 
-  const X=i=>
+  const chartSlots=
+    bars.length+
+    RIGHT_GAP_BARS;
+
+const X=i=>
     pad.l+
     (i+0.5)*
-    (plotW/bars.length);
+    (plotW/chartSlots);
 
 
   const Y=value=>
@@ -576,7 +581,7 @@ const trend=
       2,
       Math.min(
         7,
-        plotW/bars.length*0.68
+        plotW/chartSlots*0.68
       )
     );
 
