@@ -17,7 +17,7 @@ const DELAY_MS=350;
 const MAX_BARS=620;
 const RIGHT_GAP_BARS=
   window.innerWidth>=1200
-    ? 5
+    ? 3
     : 10;
 
 const VWAP_WINDOW=20;
